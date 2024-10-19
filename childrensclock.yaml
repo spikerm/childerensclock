@@ -17,7 +17,7 @@ api:
 web_server:
   ota: true
   log: off
-  version: 2
+  version: 3
 
 esphome:
   name: childrensclock
@@ -39,7 +39,7 @@ esphome:
       - light.turn_off: led_matrix_light
 
 dashboard_import:
-  package_import_url: github://chrisns/childrens-clock/childrensclock.yaml
+  package_import_url: github://spikerm/childrensclock/childrensclock.yaml
   import_full_config: false
 
 color:
