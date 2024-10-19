@@ -39,7 +39,7 @@ esphome:
       - light.turn_off: led_matrix_light
 
 dashboard_import:
-  package_import_url: github://spikerm/childrensclock/childrensclock.yaml
+  package_import_url: github://spikerm/childerensclock/childrensclock.yaml
   import_full_config: false
 
 color:
