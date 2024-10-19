@@ -27,7 +27,7 @@ esphome:
   includes:
     - src/childrensclock.h
   project:
-    name: chrisns.childrens-clock
+    name: websters.childrens-clock
     version: $VERSION
   on_boot:
     priority: 700
