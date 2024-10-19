@@ -23,7 +23,7 @@ esphome:
   name: childrensclock
   platform: ESP32
   board: esp32dev
-  name_add_mac_suffix: false
+  name_add_mac_suffix: true
   includes:
     - src/childrensclock.h
   project:
