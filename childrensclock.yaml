@@ -1,0 +1,316 @@
+wifi:
+  reboot_timeout: 0s
+  ap:
+    ssid: "Clock Fallback Hotspot"
+
+esp32_improv:
+  authorizer: false
+
+improv_serial:
+  next_url: http://{{ip_address}}
+
+captive_portal:
+  
+api:
+  reboot_timeout: 0s
+
+web_server:
+  ota: true
+  log: off
+  version: 2
+
+esphome:
+  name: childrensclock
+  platform: ESP32
+  board: esp32dev
+  name_add_mac_suffix: true
+  includes:
+    - src/childrensclock.h
+  project:
+    name: chrisns.childrens-clock
+    version: $VERSION
+  on_boot:
+    priority: 700
+    then:
+      - light.turn_off: led_matrix_light
+  on_shutdown:
+    priority: 700
+    then:
+      - light.turn_off: led_matrix_light
+
+dashboard_import:
+  package_import_url: github://chrisns/childrens-clock/childrensclock.yaml
+  import_full_config: false
+
+color:
+  - id: RED_COLOR
+    red_int: 28
+  - id: GREEN_COLOR
+    green_int: 50
+  - id: AMBER_COLOR
+    red_int: 50
+    green_int: 28
+
+ota:
+  - platform: esphome
+    on_begin:
+      then:
+        - light.turn_off: led_matrix_light
+
+logger:
+  level: DEBUG
+  baud_rate: 460800
+
+button:
+  - platform: factory_reset
+    disabled_by_default: true
+    name: Restart with Factory Default Settings
+  - platform: restart
+    name: Restart
+  - platform: safe_mode
+    disabled_by_default: true
+    name: Safe Mode Reboot
+
+sensor:
+  - name: Progress Percent
+    platform: template
+    id: progress_percent
+    internal: true
+    unit_of_measurement: "%"
+    state_class: measurement
+    icon: mdi:percent
+    update_interval: 5s
+    lambda: |
+      float now = id(current_time_decimal).state;
+      int day_of_week = id(sntp_time).now().day_of_week;
+      float percent;
+      int currentstate = id(current_state).state;
+      // TODO: improve logic so progress is calculated right on friday and sunday nights
+
+      if (day_of_week == SAT || day_of_week == SUN) {
+        if (currentstate == AMBER) {
+          percent = CalculateProgress(now, TimeAsDecimal(id(weekend_bedtime).hour, id(weekend_bedtime).minute), TimeAsDecimal(id(weekend_go).hour, id(weekend_go).minute));
+        } else {
+          percent = CalculateProgress(now, TimeAsDecimal(id(weekend_bedtime).hour, id(weekend_bedtime).minute), TimeAsDecimal(id(weekend_wake).hour, id(weekend_wake).minute));
+        }
+      } else {
+        if (currentstate == AMBER) {
+          percent = CalculateProgress(now, TimeAsDecimal(id(weekday_wake).hour, id(weekday_wake).minute), TimeAsDecimal(id(weekday_go).hour, id(weekday_go).minute));
+        } else {
+          percent = CalculateProgress(now, TimeAsDecimal(id(weekday_bedtime).hour, id(weekday_bedtime).minute), TimeAsDecimal(id(weekday_wake).hour, id(weekday_wake).minute));
+        }
+      }
+      return percent;
+
+  - name: Current time as decimal
+    disabled_by_default: true
+    platform: template
+    internal: true
+    id: current_time_decimal
+    state_class: measurement
+    icon: mdi:clock-digital
+    update_interval: 5s
+    lambda: |
+      return TimeAsDecimal(id(sntp_time).now().hour, id(sntp_time).now().minute);
+
+  - name: Dots
+    disabled_by_default: true
+    platform: template
+    id: dots
+    internal: true
+    state_class: measurement
+    update_interval: 5s
+    lambda: |
+      return ProgressToDots(id(progress_percent).state, 32);
+
+  - name: Current state
+    disabled_by_default: true
+    platform: template
+    internal: true
+    id: current_state
+    state_class: measurement
+    update_interval: 5s
+    lambda: |
+      return GetState(
+        id(sntp_time).now().day_of_week,
+        id(current_time_decimal).state,
+        TimeAsDecimal(id(weekday_go).hour, id(weekday_go).minute),
+        TimeAsDecimal(id(weekday_wake).hour, id(weekday_wake).minute),
+        TimeAsDecimal(id(weekday_bedtime).hour, id(weekday_bedtime).minute),
+        TimeAsDecimal(id(weekend_go).hour, id(weekend_go).minute),
+        TimeAsDecimal(id(weekend_wake).hour, id(weekend_wake).minute),
+        TimeAsDecimal(id(weekend_bedtime).hour, id(weekend_bedtime).minute)
+      );
+
+time:
+  - platform: sntp
+    id: sntp_time
+    timezone: GMT0
+    servers:
+     - 0.pool.ntp.org
+     - 1.pool.ntp.org
+     - 2.pool.ntp.org
+    on_time_sync:
+      then:
+        - if:
+            condition:
+              - light.is_off: led_matrix_light
+            then:
+              - light.turn_on: led_matrix_light
+        - lambda: |
+            auto current = id(sntp_time).get_timezone().c_str();
+            auto desired = id(tz).state.c_str();
+            if (id(sntp_time).now().is_valid() && strcmp(current,desired) != 0) {
+              ESP_LOGI("TIME", "Timezone doesn't match desired current %s, desired %s", current, desired);
+              id(sntp_time).set_timezone(desired);
+              id(sntp_time).call_setup();
+            }
+    on_time:
+      - seconds: 5
+        then:
+          lambda: |
+            auto current = id(sntp_time).get_timezone().c_str();
+            auto desired = id(tz).state.c_str();
+            if (id(sntp_time).now().is_valid() && strcmp(current,desired) != 0) {
+              ESP_LOGI("TIME", "Timezone doesn't match desired current %s, desired %s", current, desired);
+              id(sntp_time).set_timezone(desired);
+              id(sntp_time).call_setup();
+            }
+
+font:
+  - id: tinyfont
+    file: "lexis.ttf"
+    size: 8
+    glyphs: :0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ
+
+datetime:
+  - platform: template
+    id: weekday_go
+    type: time
+    name: Weekday go
+    optimistic: yes
+    initial_value: "08:00"
+    restore_value: true
+    # web_server_sorting_weight: 3
+
+
+  - platform: template
+    id: weekday_wake
+    type: time
+    name: Weekday wake up
+    optimistic: yes
+    initial_value: "07:00"
+    restore_value: true
+    # web_server_sorting_weight: 2
+
+  - platform: template
+    id: weekday_bedtime
+    type: time
+    name: Weekday bedtime
+    optimistic: yes
+    initial_value: "18:00"
+    restore_value: true
+    # web_server_sorting_weight: 1
+
+  - platform: template
+    id: weekend_go
+    type: time
+    name: Weekend go
+    optimistic: yes
+    initial_value: "08:00"
+    restore_value: true
+    # web_server_sorting_weight: 6
+
+  - platform: template
+    id: weekend_wake
+    type: time
+    name: Weekend wake up
+    optimistic: yes
+    initial_value: "07:00"
+    restore_value: true
+    # web_server_sorting_weight: 5
+
+  - platform: template
+    id: weekend_bedtime
+    type: time
+    name: Weekend bedtime
+    optimistic: yes
+    initial_value: "18:00"
+    restore_value: true
+    # web_server_sorting_weight: 4
+
+text_sensor:
+  - platform: template
+    name: Current time
+    id: current_time
+    disabled_by_default: true
+    lambda: |-
+      return id(sntp_time).now().is_valid() ? id(sntp_time).now().strftime("%I:%M") : "";
+    update_interval: 5s
+
+text:
+  - platform: template
+    name: Timezone from https://github.com/nayarsystems/posix_tz_db/blob/master/zones.csv
+    id: tz
+    mode: text
+    optimistic: yes
+    initial_value: "GMT0"
+    restore_value: true
+
+light:
+  - platform: neopixelbus
+    internal: true
+    type: GRB
+    variant: WS2812
+    pin: GPIO13
+    num_leds: 256
+    name: "Clock Led Matrix"
+    id: led_matrix_light
+    default_transition_length: 0s
+    icon: mdi:clock-digital
+    restore_mode: ALWAYS_OFF
+
+
+display:
+  - platform: addressable_light
+    id: led_matrix_display
+    addressable_light_id: led_matrix_light
+    width: 32
+    height: 8
+    rotation: 0°
+    pixel_mapper: |-
+      if (x % 2 == 0) {
+        return (x * 8) + y;
+      }
+      return (x * 8) + (7 - y);
+    lambda: |-
+        auto color = Color(0, 0, 0);
+
+        int currentstate = id(current_state).state;
+
+        switch (currentstate) {
+          case RED:
+            color = id(RED_COLOR);
+            break;
+          case AMBER:
+            color = id(AMBER_COLOR);
+            break;
+          case GREEN:
+            color = id(GREEN_COLOR);
+            break;
+        }
+
+        int line_length = id(dots).state;
+        auto time_text = id(current_time).state;
+        
+        it.line(0, 0, line_length, 0, color);
+
+
+        it.print(
+          1,
+          1, 
+          id(tinyfont),
+          color, 
+          TextAlign::TOP_LEFT,
+          time_text.c_str()
+        );
